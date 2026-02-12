@@ -1,0 +1,402 @@
+name: Build liboqs Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      liboqs_version:
+        description: 'liboqs version to build (e.g., 0.15.0)'
+        required: true
+        default: '0.15.0'
+  schedule:
+    # Check for new releases daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  LIBOQS_REPO: 'open-quantum-safe/liboqs'
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      should_build: ${{ steps.check-built.outputs.should_build }}
+    steps:
+      - name: Get latest liboqs release
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.liboqs_version }}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(curl -s https://api.github.com/repos/${{ env.LIBOQS_REPO }}/releases/latest | jq -r .tag_name)
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check if already built
+        id: check-built
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION)
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "Release $VERSION already exists, skipping build"
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "Release $VERSION not found, will build"
+          fi
+
+  # Linux builds (x86_64 and ARM64)
+  build-linux:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout liboqs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ needs.check-release.outputs.version }}
+      
+      - name: Set up QEMU
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      
+      - name: Build in Docker
+        run: |
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            docker run --rm --platform linux/arm64 \
+              -v $PWD:/workspace \
+              -w /workspace \
+              arm64v8/ubuntu:22.04 bash -c "
+                apt-get update && \
+                apt-get install -y cmake gcc g++ libssl-dev ninja-build && \
+                mkdir -p build && cd build && \
+                cmake -GNinja \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_INSTALL_PREFIX=/workspace/install \
+                  -DBUILD_SHARED_LIBS=ON \
+                  .. && \
+                ninja && ninja install
+              "
+          else
+            docker run --rm \
+              -v $PWD:/workspace \
+              -w /workspace \
+              ubuntu:22.04 bash -c "
+                apt-get update && \
+                apt-get install -y cmake gcc g++ libssl-dev ninja-build && \
+                mkdir -p build && cd build && \
+                cmake -GNinja \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_INSTALL_PREFIX=/workspace/install \
+                  -DBUILD_SHARED_LIBS=ON \
+                  .. && \
+                ninja && ninja install
+              "
+          fi
+      
+      - name: Package binaries
+        run: |
+          cd install
+          tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-linux-${{ matrix.arch }}.tar.gz *
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-linux-${{ matrix.arch }}
+          path: liboqs-${{ needs.check-release.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
+
+  # macOS builds (x86_64 and ARM64)
+  build-macos:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13
+          - arch: arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout liboqs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ needs.check-release.outputs.version }}
+      
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja openssl@3
+      
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install \
+            -DBUILD_SHARED_LIBS=ON \
+            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
+            ..
+          ninja
+          ninja install
+      
+      - name: Package binaries
+        run: |
+          cd install
+          tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-macos-${{ matrix.arch }}.tar.gz *
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-macos-${{ matrix.arch }}
+          path: liboqs-${{ needs.check-release.outputs.version }}-macos-${{ matrix.arch }}.tar.gz
+
+  # Windows builds (x86_64 and ARM64)
+  build-windows:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        arch: [x64, ARM64]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout liboqs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ needs.check-release.outputs.version }}
+      
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      
+      - name: Install dependencies
+        run: |
+          choco install cmake ninja openssl -y
+      
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          cmake -GNinja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$PWD\..\install" `
+            -DBUILD_SHARED_LIBS=ON `
+            ..
+          ninja
+          ninja install
+      
+      - name: Package binaries
+        run: |
+          cd install
+          7z a ..\liboqs-${{ needs.check-release.outputs.version }}-windows-${{ matrix.arch }}.zip *
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-windows-${{ matrix.arch }}
+          path: liboqs-${{ needs.check-release.outputs.version }}-windows-${{ matrix.arch }}.zip
+
+  # iOS build (universal framework)
+  build-ios:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    runs-on: macos-14
+    steps:
+      - name: Checkout liboqs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ needs.check-release.outputs.version }}
+      
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja
+      
+      - name: Build for iOS architectures
+        run: |
+          # Build for arm64 (device)
+          mkdir build-ios-arm64 && cd build-ios-arm64
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install-ios-arm64 \
+            -DBUILD_SHARED_LIBS=OFF \
+            ..
+          ninja
+          ninja install
+          cd ..
+          
+          # Build for arm64 simulator
+          mkdir build-ios-sim-arm64 && cd build-ios-sim-arm64
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install-ios-sim-arm64 \
+            -DBUILD_SHARED_LIBS=OFF \
+            ..
+          ninja
+          ninja install
+          cd ..
+          
+          # Build for x86_64 simulator
+          mkdir build-ios-sim-x64 && cd build-ios-sim-x64
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install-ios-sim-x64 \
+            -DBUILD_SHARED_LIBS=OFF \
+            ..
+          ninja
+          ninja install
+          cd ..
+      
+      - name: Create XCFramework
+        run: |
+          # Create simulator fat library
+          mkdir -p install-ios-simulator/lib
+          lipo -create \
+            install-ios-sim-arm64/lib/liboqs.a \
+            install-ios-sim-x64/lib/liboqs.a \
+            -output install-ios-simulator/lib/liboqs.a
+          
+          cp -r install-ios-sim-arm64/include install-ios-simulator/
+          
+          # Create XCFramework
+          xcodebuild -create-xcframework \
+            -library install-ios-arm64/lib/liboqs.a \
+            -headers install-ios-arm64/include \
+            -library install-ios-simulator/lib/liboqs.a \
+            -headers install-ios-simulator/include \
+            -output liboqs.xcframework
+      
+      - name: Package framework
+        run: |
+          zip -r liboqs-${{ needs.check-release.outputs.version }}-ios.xcframework.zip liboqs.xcframework
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-ios
+          path: liboqs-${{ needs.check-release.outputs.version }}-ios.xcframework.zip
+
+  # Android builds (multiple architectures)
+  build-android:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    strategy:
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout liboqs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ needs.check-release.outputs.version }}
+      
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: true
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+      
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install \
+            -DBUILD_SHARED_LIBS=ON \
+            ..
+          ninja
+          ninja install
+      
+      - name: Package binaries
+        run: |
+          cd install
+          tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-android-${{ matrix.abi }}.tar.gz *
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-android-${{ matrix.abi }}
+          path: liboqs-${{ needs.check-release.outputs.version }}-android-${{ matrix.abi }}.tar.gz
+
+  # Create GitHub Release
+  create-release:
+    needs: [check-release, build-linux, build-macos, build-windows, build-ios, build-android]
+    if: needs.check-release.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.check-release.outputs.version }}
+          name: liboqs ${{ needs.check-release.outputs.version }}
+          body: |
+            Pre-built binaries for liboqs ${{ needs.check-release.outputs.version }}
+            
+            Source: https://github.com/${{ env.LIBOQS_REPO }}/releases/tag/${{ needs.check-release.outputs.version }}
+            
+            ## Platforms
+            
+            ### Linux
+            - x86_64 (AMD64)
+            - aarch64 (ARM64)
+            
+            ### macOS
+            - x86_64 (Intel)
+            - arm64 (Apple Silicon)
+            
+            ### Windows
+            - x64
+            - ARM64
+            
+            ### iOS
+            - XCFramework (supports device arm64 and simulator arm64/x86_64)
+            
+            ### Android
+            - armeabi-v7a (32-bit ARM)
+            - arm64-v8a (64-bit ARM)
+            - x86 (32-bit Intel)
+            - x86_64 (64-bit Intel)
+            
+            ## Usage
+            
+            Download the appropriate archive for your platform and extract it.
+            The archive contains the compiled libraries in `lib/` and headers in `include/`.
+          files: artifacts/**/*
+          draft: false
+          prerelease: false

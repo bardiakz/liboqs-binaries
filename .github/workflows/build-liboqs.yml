@@ -164,7 +164,11 @@ jobs:
     if: needs.check-release.outputs.should_build == 'true'
     strategy:
       matrix:
-        arch: [x64, ARM64]
+        include:
+          - arch: x64
+            msvc_arch: x64
+          - arch: ARM64
+            msvc_arch: x64_arm64
     runs-on: windows-latest
     steps:
       - name: Checkout liboqs
@@ -176,11 +180,11 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: ${{ matrix.arch }}
+          arch: ${{ matrix.msvc_arch }}
       
       - name: Install dependencies
         run: |
-          choco install cmake ninja openssl -y
+          choco install cmake ninja -y
       
       - name: Build
         run: |
@@ -190,6 +194,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$PWD\..\install" `
             -DBUILD_SHARED_LIBS=ON `
+            -DOQS_USE_OPENSSL=OFF `
             ..
           ninja
           ninja install
@@ -322,6 +327,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build
       
+      - name: Patch CMakeLists for Android
+        run: |
+          # Force disable OpenSSL in CMakeLists
+          sed -i 's/option(OQS_USE_OPENSSL ".*" ON)/option(OQS_USE_OPENSSL "Use OpenSSL" OFF)/' CMakeLists.txt || true
+          # Make OpenSSL search not required if it still happens
+          sed -i 's/find_package(OpenSSL [0-9.]* REQUIRED)/find_package(OpenSSL)/' CMakeLists.txt || true
+
       - name: Build
         run: |
           mkdir build && cd build
@@ -332,6 +344,8 @@ jobs:
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_INSTALL_PREFIX=$PWD/../install \
             -DBUILD_SHARED_LIBS=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_DIST_BUILD=ON \
             ..
           ninja
           ninja install

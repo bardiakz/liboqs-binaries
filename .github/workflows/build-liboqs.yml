@@ -168,12 +168,24 @@ jobs:
       - name: Install dependencies
         run: choco install cmake ninja -y
       
+      - name: Patch CMakeLists to force disable tests
+        shell: pwsh
+        run: |
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace 'option\(BUILD_TESTING.*\)', 'option(BUILD_TESTING "Build tests" OFF)'
+          $content = $content -replace 'if\(BUILD_TESTING\)', 'if(FALSE)'
+          $content = $content -replace 'enable_testing\(\)', '# enable_testing()'
+          $content = $content -replace 'add_subdirectory\(tests\)', '# add_subdirectory(tests)'
+          Set-Content CMakeLists.txt $content
+          Write-Host "Patched CMakeLists.txt"
+      
       - name: Build
         shell: cmd
         run: |
           mkdir build
           cd build
-          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DOQS_USE_OPENSSL=OFF -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=install ..
+          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DOQS_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX=install ..
+          ninja oqs
           ninja install
       
       - name: Package

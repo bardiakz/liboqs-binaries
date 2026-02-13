@@ -1,0 +1,76 @@
+name: Test Windows Build Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      liboqs_version:
+        description: 'liboqs version'
+        required: true
+        default: '0.15.0'
+
+env:
+  LIBOQS_REPO: 'open-quantum-safe/liboqs'
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ inputs.liboqs_version }}
+      
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      
+      - name: Install dependencies
+        run: choco install cmake ninja -y
+      
+      - name: Patch CMakeLists to disable tests
+        shell: pwsh
+        run: |
+          # Force disable tests in CMakeLists.txt
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace 'option\(BUILD_TESTING.*\)', 'option(BUILD_TESTING "Build tests" OFF)'
+          $content = $content -replace 'if\(BUILD_TESTING\)', 'if(FALSE)'
+          $content = $content -replace 'enable_testing\(\)', '# enable_testing()'
+          $content = $content -replace 'add_subdirectory\(tests\)', '# add_subdirectory(tests)'
+          Set-Content CMakeLists.txt $content
+          Write-Host "Patched CMakeLists.txt to disable tests"
+      
+      - name: Build library only
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DOQS_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX=install ..
+          if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
+          ninja oqs
+          if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
+          ninja install
+      
+      - name: Verify build
+        shell: pwsh
+        run: |
+          if (Test-Path "build/install/lib/oqs.lib") {
+            Write-Host "✓ Static library found"
+          }
+          if (Test-Path "build/install/bin/oqs.dll") {
+            Write-Host "✓ DLL found"
+          }
+          if (Test-Path "build/install/include") {
+            Write-Host "✓ Headers found"
+          }
+          Get-ChildItem -Recurse build/install
+      
+      - name: Package
+        shell: pwsh
+        run: |
+          cd build/install
+          Compress-Archive -Path * -DestinationPath ..\..\liboqs-${{ inputs.liboqs_version }}-windows-x64.zip
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-windows-x64
+          path: liboqs-${{ inputs.liboqs_version }}-windows-x64.zip

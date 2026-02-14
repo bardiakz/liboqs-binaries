@@ -1,0 +1,344 @@
+name: Build liboqs (Simplified)
+
+on:
+  workflow_dispatch:
+    inputs:
+      liboqs_version:
+        description: 'liboqs version to build (e.g., 0.15.0)'
+        required: true
+        default: '0.15.0'
+
+env:
+  LIBOQS_REPO: 'open-quantum-safe/liboqs'
+
+jobs:
+  # Linux x86_64 only
+  build-linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ github.event.inputs.liboqs_version }}
+      
+      - name: Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev
+          mkdir build && cd build
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install \
+            ..
+          ninja install
+      
+      - name: Package
+        run: |
+          cd install
+          tar -czf ../liboqs-${{ github.event.inputs.liboqs_version }}-linux-x86_64.tar.gz *
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-linux-x86_64
+          path: liboqs-${{ github.event.inputs.liboqs_version }}-linux-x86_64.tar.gz
+
+  # macOS ARM64 only
+  build-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ github.event.inputs.liboqs_version }}
+      
+      - name: Build
+        run: |
+          brew install cmake ninja openssl@3
+          mkdir build && cd build
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_TESTING=OFF \
+            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install \
+            ..
+          ninja install
+      
+      - name: Package
+        run: |
+          cd install
+          tar -czf ../liboqs-${{ github.event.inputs.liboqs_version }}-macos-arm64.tar.gz *
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-macos-arm64
+          path: liboqs-${{ github.event.inputs.liboqs_version }}-macos-arm64.tar.gz
+
+  # Windows x64
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ github.event.inputs.liboqs_version }}
+      
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      
+      - name: Install dependencies
+        run: choco install cmake ninja -y
+      
+      - name: Patch CMakeLists to force disable tests
+        shell: pwsh
+        run: |
+          $content = Get-Content CMakeLists.txt -Raw
+          $content = $content -replace 'option\(BUILD_TESTING.*\)', 'option(BUILD_TESTING "Build tests" OFF)'
+          $content = $content -replace 'if\(BUILD_TESTING\)', 'if(FALSE)'
+          $content = $content -replace 'enable_testing\(\)', '# enable_testing()'
+          $content = $content -replace 'add_subdirectory\(tests\)', '# add_subdirectory(tests)'
+          Set-Content CMakeLists.txt $content
+          Write-Host "Patched CMakeLists.txt"
+      
+      - name: Build
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DOQS_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX=install ..
+          ninja oqs
+          ninja install
+      
+      - name: Package
+        shell: pwsh
+        run: |
+          cd build/install
+          Compress-Archive -Path * -DestinationPath ..\..\liboqs-${{ github.event.inputs.liboqs_version }}-windows-x64.zip
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-windows-x64
+          path: liboqs-${{ github.event.inputs.liboqs_version }}-windows-x64.zip
+
+  # iOS XCFramework
+  build-ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ github.event.inputs.liboqs_version }}
+      
+      - name: Install dependencies
+        run: brew install cmake ninja
+      
+      - name: Patch for iOS
+        run: |
+          sed -i '' 's/message(FATAL_ERROR "Unknown or unsupported processor/message(WARNING "Unknown or unsupported processor/' CMakeLists.txt || true
+      
+      - name: Build iOS Device (arm64)
+        run: |
+          mkdir build-device && cd build-device
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_DIST_BUILD=ON \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install-device \
+            ..
+          ninja install
+      
+      - name: Build iOS Simulator (arm64)
+        run: |
+          mkdir build-sim-arm64 && cd build-sim-arm64
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_DIST_BUILD=ON \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install-sim-arm64 \
+            ..
+          ninja install
+      
+      - name: Build iOS Simulator (x86_64)
+        run: |
+          mkdir build-sim-x64 && cd build-sim-x64
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DOQS_PERMIT_UNSUPPORTED_ARCHITECTURE=ON \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_DIST_BUILD=ON \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install-sim-x64 \
+            ..
+          ninja install
+      
+      - name: Create XCFramework
+        run: |
+          mkdir -p install-simulator/lib
+          lipo -create \
+            install-sim-arm64/lib/liboqs.a \
+            install-sim-x64/lib/liboqs.a \
+            -output install-simulator/lib/liboqs.a
+          cp -r install-sim-arm64/include install-simulator/
+          
+          xcodebuild -create-xcframework \
+            -library install-device/lib/liboqs.a \
+            -headers install-device/include \
+            -library install-simulator/lib/liboqs.a \
+            -headers install-simulator/include \
+            -output liboqs.xcframework
+          
+          zip -r liboqs-${{ github.event.inputs.liboqs_version }}-ios.xcframework.zip liboqs.xcframework
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-ios
+          path: liboqs-${{ github.event.inputs.liboqs_version }}-ios.xcframework.zip
+
+  # Android builds
+  build-android:
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LIBOQS_REPO }}
+          ref: ${{ github.event.inputs.liboqs_version }}
+      
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: true
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      
+      - name: Patch for Android
+        run: |
+          sed -i 's/find_package(OpenSSL [0-9.]* REQUIRED)/find_package(OpenSSL)/' CMakeLists.txt
+          sed -i 's/option(OQS_USE_OPENSSL ".*" ON)/option(OQS_USE_OPENSSL "Use OpenSSL" OFF)/' CMakeLists.txt
+      
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_TESTING=OFF \
+            -DOQS_USE_OPENSSL=OFF \
+            -DOQS_DIST_BUILD=ON \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../install \
+            ..
+          ninja install
+      
+      - name: Package
+        run: |
+          cd install
+          tar -czf ../liboqs-${{ github.event.inputs.liboqs_version }}-android-${{ matrix.abi }}.tar.gz *
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-android-${{ matrix.abi }}
+          path: liboqs-${{ github.event.inputs.liboqs_version }}-android-${{ matrix.abi }}.tar.gz
+
+  # Create GitHub Release
+  create-release:
+    needs: 
+      - build-linux-x64
+      - build-macos-arm64
+      - build-windows-x64
+      - build-ios
+      - build-android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Display structure
+        run: ls -R artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.liboqs_version }}
+          name: liboqs ${{ github.event.inputs.liboqs_version }}
+          body: |
+            ## Pre-built binaries for liboqs ${{ github.event.inputs.liboqs_version }}
+            
+            Source: https://github.com/${{ env.LIBOQS_REPO }}/releases/tag/${{ github.event.inputs.liboqs_version }}
+            
+            ### Desktop Platforms
+            - **Linux**: x86_64 only
+            - **macOS**: ARM64 (Apple Silicon) only
+            - **Windows**: x64
+            
+            ### Mobile Platforms
+            - **iOS**: XCFramework (device ARM64 + simulator ARM64/x86_64)
+            - **Android**: armeabi-v7a, arm64-v8a, x86, x86_64 (API level 21+)
+            
+            ### Note on Platform Selection
+            This release focuses on the most commonly used platforms:
+            - Linux x86_64 covers most server and desktop deployments
+            - macOS ARM64 covers M1/M2/M3/M4 Macs (most current Macs)
+            - Excluded: Linux ARM64, macOS x86_64 (Intel) due to runner availability
+            
+            ### Usage
+            Download the appropriate archive for your platform and extract it.
+            Archives contain compiled libraries in `lib/` and headers in `include/`.
+            
+            ### Build Details
+            - Build type: Release
+            - OpenSSL: Disabled (except Linux desktop)
+            - Tests: Disabled
+            - NDK (Android): r27c
+            - iOS deployment target: 13.0
+            
+            ### Files in this Release
+            ```
+            liboqs-${{ github.event.inputs.liboqs_version }}-linux-x86_64.tar.gz
+            liboqs-${{ github.event.inputs.liboqs_version }}-macos-arm64.tar.gz
+            liboqs-${{ github.event.inputs.liboqs_version }}-windows-x64.zip
+            liboqs-${{ github.event.inputs.liboqs_version }}-ios.xcframework.zip
+            liboqs-${{ github.event.inputs.liboqs_version }}-android-armeabi-v7a.tar.gz
+            liboqs-${{ github.event.inputs.liboqs_version }}-android-arm64-v8a.tar.gz
+            liboqs-${{ github.event.inputs.liboqs_version }}-android-x86.tar.gz
+            liboqs-${{ github.event.inputs.liboqs_version }}-android-x86_64.tar.gz
+            ```
+          files: artifacts/**/*
+          draft: false
+          prerelease: false

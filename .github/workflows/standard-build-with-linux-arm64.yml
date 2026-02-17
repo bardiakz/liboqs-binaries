@@ -387,24 +387,63 @@ jobs:
         run: |
           mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}
 
-          for artifact in artifacts/*/liboqs-*.tar.gz; do
-            [ -f "$artifact" ] && tar -xzf "$artifact" -C combined/liboqs-${{ needs.check-release.outputs.version }} || true
+          # Extract macOS, Windows, iOS (no conflict - unique files)
+          for artifact in artifacts/liboqs-macos-arm64 artifacts/liboqs-windows-x64 artifacts/liboqs-ios; do
+            for f in $artifact/liboqs-*.tar.gz $artifact/liboqs-*.zip; do
+              [ -f "$f" ] && tar -xzf "$f" -C combined/liboqs-${{ needs.check-release.outputs.version }} 2>/dev/null || \
+              [ -f "$f" ] && unzip -q "$f" -d combined/liboqs-${{ needs.check-release.outputs.version }} 2>/dev/null || true
+            done
           done
 
-          for artifact in artifacts/*/liboqs-*.zip; do
-            [ -f "$artifact" ] && unzip -q "$artifact" -d combined/liboqs-${{ needs.check-release.outputs.version }} || true
+          # Extract Linux x86_64 into arch-specific subdir to avoid overwrite
+          mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}/lib/x86_64
+          if [ -f artifacts/liboqs-linux-x86_64/liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz ]; then
+            tmp=$(mktemp -d)
+            tar -xzf artifacts/liboqs-linux-x86_64/liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz -C "$tmp"
+            cp "$tmp"/lib/liboqs.so* combined/liboqs-${{ needs.check-release.outputs.version }}/lib/x86_64/ 2>/dev/null || true
+            rm -rf "$tmp"
+          fi
+
+          # Extract Linux aarch64 into arch-specific subdir
+          mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}/lib/aarch64
+          if [ -f artifacts/liboqs-linux-aarch64/liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz ]; then
+            tmp=$(mktemp -d)
+            tar -xzf artifacts/liboqs-linux-aarch64/liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz -C "$tmp"
+            cp "$tmp"/lib/liboqs.so* combined/liboqs-${{ needs.check-release.outputs.version }}/lib/aarch64/ 2>/dev/null || true
+            rm -rf "$tmp"
+          fi
+
+          # Extract Android ABIs into abi-specific subdirs
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            artifact="artifacts/liboqs-android-$abi/liboqs-${{ needs.check-release.outputs.version }}-android-$abi.tar.gz"
+            if [ -f "$artifact" ]; then
+              tmp=$(mktemp -d)
+              tar -xzf "$artifact" -C "$tmp"
+              mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}/android/$abi
+              cp "$tmp"/lib/liboqs.so combined/liboqs-${{ needs.check-release.outputs.version }}/android/$abi/ 2>/dev/null || true
+              rm -rf "$tmp"
+            fi
           done
 
           cat > combined/liboqs-${{ needs.check-release.outputs.version }}/README.txt << 'EOF'
           liboqs - All Platforms Combined
           ================================
-          
+
           Structure:
-            lib/     - Compiled libraries for all platforms
-            include/ - Header files
-            bin/     - Windows DLLs
-          
-          Individual platform archives are also available in the release.
+            lib/x86_64/liboqs.so      - Linux x86_64
+            lib/aarch64/liboqs.so     - Linux ARM64
+            lib/liboqs.dylib          - macOS ARM64
+            lib/cmake/                - CMake config
+            bin/oqs.dll               - Windows x64
+            include/oqs/              - Headers
+            android/arm64-v8a/        - Android ARM64
+            android/armeabi-v7a/      - Android ARM32
+            android/x86_64/           - Android x86_64
+            android/x86/              - Android x86
+            liboqs.xcframework/       - iOS XCFramework
+
+          Usage with LibOQSLoader:
+            LibOQSLoader.loadLibrary(binaryRoot: '/path/to/liboqs-VERSION');
           EOF
 
           cd combined

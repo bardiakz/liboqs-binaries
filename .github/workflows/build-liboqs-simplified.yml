@@ -7,9 +7,6 @@ on:
         description: 'liboqs version to build (e.g., 0.15.0)'
         required: true
         default: '0.15.0'
-  schedule:
-    # Check for new releases daily at 2 AM UTC
-    - cron: '0 2 * * *'
 
 env:
   LIBOQS_REPO: 'open-quantum-safe/liboqs'

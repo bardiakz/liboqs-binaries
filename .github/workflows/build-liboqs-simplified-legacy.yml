@@ -1,4 +1,4 @@
-name: Build liboqs (With Linux ARM64)
+name: Build liboqs (Simplified)
 
 on:
   workflow_dispatch:
@@ -7,9 +7,6 @@ on:
         description: 'liboqs version to build (e.g., 0.15.0)'
         required: true
         default: '0.15.0'
-  schedule:
-    # Check for new releases daily at 2 AM UTC
-    - cron: '0 2 * * *'
 
 env:
   LIBOQS_REPO: 'open-quantum-safe/liboqs'
@@ -30,7 +27,7 @@ jobs:
             VERSION=$(curl -s https://api.github.com/repos/${{ env.LIBOQS_REPO }}/releases/latest | jq -r .tag_name)
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           fi
-
+      
       - name: Check if already built
         id: check-built
         run: |
@@ -46,7 +43,7 @@ jobs:
             echo "Release $VERSION not found, will build"
           fi
 
-  # Linux x86_64
+  # Linux x86_64 only
   build-linux-x64:
     needs: check-release
     if: needs.check-release.outputs.should_build == 'true'
@@ -56,7 +53,7 @@ jobs:
         with:
           repository: ${{ env.LIBOQS_REPO }}
           ref: ${{ needs.check-release.outputs.version }}
-
+      
       - name: Build
         run: |
           sudo apt-get update
@@ -69,62 +66,18 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$PWD/../install \
             ..
           ninja install
-
+      
       - name: Package
         run: |
           cd install
           tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz *
-
+      
       - uses: actions/upload-artifact@v4
         with:
           name: liboqs-linux-x86_64
           path: liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz
 
-  # Linux ARM64 (via QEMU)
-  build-linux-arm64:
-    needs: check-release
-    if: needs.check-release.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.LIBOQS_REPO }}
-          ref: ${{ needs.check-release.outputs.version }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v $PWD:/workspace \
-            -w /workspace \
-            arm64v8/ubuntu:22.04 bash -c "
-              apt-get update && \
-              apt-get install -y cmake gcc g++ libssl-dev ninja-build && \
-              mkdir build && cd build && \
-              cmake -GNinja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DBUILD_SHARED_LIBS=ON \
-                -DBUILD_TESTING=OFF \
-                -DCMAKE_INSTALL_PREFIX=/workspace/install \
-                .. && \
-              ninja install
-            "
-
-      - name: Package
-        run: |
-          cd install
-          tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz *
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: liboqs-linux-aarch64
-          path: liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz
-
-  # macOS ARM64
+  # macOS ARM64 only
   build-macos-arm64:
     needs: check-release
     if: needs.check-release.outputs.should_build == 'true'
@@ -134,7 +87,7 @@ jobs:
         with:
           repository: ${{ env.LIBOQS_REPO }}
           ref: ${{ needs.check-release.outputs.version }}
-
+      
       - name: Build
         run: |
           brew install cmake ninja openssl@3
@@ -148,12 +101,12 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$PWD/../install \
             ..
           ninja install
-
+      
       - name: Package
         run: |
           cd install
           tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-macos-arm64.tar.gz *
-
+      
       - uses: actions/upload-artifact@v4
         with:
           name: liboqs-macos-arm64
@@ -169,14 +122,14 @@ jobs:
         with:
           repository: ${{ env.LIBOQS_REPO }}
           ref: ${{ needs.check-release.outputs.version }}
-
+      
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-
+      
       - name: Install dependencies
         run: choco install cmake ninja -y
-
+      
       - name: Patch CMakeLists to force disable tests
         shell: pwsh
         run: |
@@ -187,7 +140,7 @@ jobs:
           $content = $content -replace 'add_subdirectory\(tests\)', '# add_subdirectory(tests)'
           Set-Content CMakeLists.txt $content
           Write-Host "Patched CMakeLists.txt"
-
+      
       - name: Build
         shell: cmd
         run: |
@@ -196,13 +149,13 @@ jobs:
           cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DOQS_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX=install ..
           ninja oqs
           ninja install
-
+      
       - name: Package
         shell: pwsh
         run: |
           cd build/install
           Compress-Archive -Path * -DestinationPath ..\..\liboqs-${{ needs.check-release.outputs.version }}-windows-x64.zip
-
+      
       - uses: actions/upload-artifact@v4
         with:
           name: liboqs-windows-x64
@@ -218,14 +171,14 @@ jobs:
         with:
           repository: ${{ env.LIBOQS_REPO }}
           ref: ${{ needs.check-release.outputs.version }}
-
+      
       - name: Install dependencies
         run: brew install cmake ninja
-
+      
       - name: Patch for iOS
         run: |
           sed -i '' 's/message(FATAL_ERROR "Unknown or unsupported processor/message(WARNING "Unknown or unsupported processor/' CMakeLists.txt || true
-
+      
       - name: Build iOS Device (arm64)
         run: |
           mkdir build-device && cd build-device
@@ -243,7 +196,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$PWD/../install-device \
             ..
           ninja install
-
+      
       - name: Build iOS Simulator (arm64)
         run: |
           mkdir build-sim-arm64 && cd build-sim-arm64
@@ -262,7 +215,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$PWD/../install-sim-arm64 \
             ..
           ninja install
-
+      
       - name: Build iOS Simulator (x86_64)
         run: |
           mkdir build-sim-x64 && cd build-sim-x64
@@ -281,7 +234,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$PWD/../install-sim-x64 \
             ..
           ninja install
-
+      
       - name: Create XCFramework
         run: |
           mkdir -p install-simulator/lib
@@ -290,16 +243,16 @@ jobs:
             install-sim-x64/lib/liboqs.a \
             -output install-simulator/lib/liboqs.a
           cp -r install-sim-arm64/include install-simulator/
-
+          
           xcodebuild -create-xcframework \
             -library install-device/lib/liboqs.a \
             -headers install-device/include \
             -library install-simulator/lib/liboqs.a \
             -headers install-simulator/include \
             -output liboqs.xcframework
-
+          
           zip -r liboqs-${{ needs.check-release.outputs.version }}-ios.xcframework.zip liboqs.xcframework
-
+      
       - uses: actions/upload-artifact@v4
         with:
           name: liboqs-ios
@@ -319,21 +272,21 @@ jobs:
         with:
           repository: ${{ env.LIBOQS_REPO }}
           ref: ${{ needs.check-release.outputs.version }}
-
+      
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
           add-to-path: true
-
+      
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
-
+      
       - name: Patch for Android
         run: |
           sed -i 's/find_package(OpenSSL [0-9.]* REQUIRED)/find_package(OpenSSL)/' CMakeLists.txt
           sed -i 's/option(OQS_USE_OPENSSL ".*" ON)/option(OQS_USE_OPENSSL "Use OpenSSL" OFF)/' CMakeLists.txt
-
+      
       - name: Build
         run: |
           mkdir build && cd build
@@ -349,12 +302,12 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$PWD/../install \
             ..
           ninja install
-
+      
       - name: Package
         run: |
           cd install
           tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-android-${{ matrix.abi }}.tar.gz *
-
+      
       - uses: actions/upload-artifact@v4
         with:
           name: liboqs-android-${{ matrix.abi }}
@@ -362,10 +315,9 @@ jobs:
 
   # Create GitHub Release
   create-release:
-    needs:
+    needs: 
       - check-release
       - build-linux-x64
-      - build-linux-arm64
       - build-macos-arm64
       - build-windows-x64
       - build-ios
@@ -379,79 +331,54 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
+      
       - name: Display structure
         run: ls -R artifacts
-
+      
       - name: Create combined all-platforms archive
         run: |
           mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}
-
-          # Extract macOS, Windows, iOS (no conflict - unique files)
-          for artifact in artifacts/liboqs-macos-arm64 artifacts/liboqs-windows-x64 artifacts/liboqs-ios; do
-            for f in $artifact/liboqs-*.tar.gz $artifact/liboqs-*.zip; do
-              [ -f "$f" ] && tar -xzf "$f" -C combined/liboqs-${{ needs.check-release.outputs.version }} 2>/dev/null || \
-              [ -f "$f" ] && unzip -q "$f" -d combined/liboqs-${{ needs.check-release.outputs.version }} 2>/dev/null || true
-            done
+          
+          # Extract all artifacts into combined directory
+          for artifact in artifacts/*/liboqs-*.tar.gz; do
+            [ -f "$artifact" ] && tar -xzf "$artifact" -C combined/liboqs-${{ needs.check-release.outputs.version }} || true
           done
-
-          # Extract Linux x86_64 into arch-specific subdir to avoid overwrite
-          mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}/lib/x86_64
-          if [ -f artifacts/liboqs-linux-x86_64/liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz ]; then
-            tmp=$(mktemp -d)
-            tar -xzf artifacts/liboqs-linux-x86_64/liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz -C "$tmp"
-            cp "$tmp"/lib/liboqs.so* combined/liboqs-${{ needs.check-release.outputs.version }}/lib/x86_64/ 2>/dev/null || true
-            rm -rf "$tmp"
-          fi
-
-          # Extract Linux aarch64 into arch-specific subdir
-          mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}/lib/aarch64
-          if [ -f artifacts/liboqs-linux-aarch64/liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz ]; then
-            tmp=$(mktemp -d)
-            tar -xzf artifacts/liboqs-linux-aarch64/liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz -C "$tmp"
-            cp "$tmp"/lib/liboqs.so* combined/liboqs-${{ needs.check-release.outputs.version }}/lib/aarch64/ 2>/dev/null || true
-            rm -rf "$tmp"
-          fi
-
-          # Extract Android ABIs into abi-specific subdirs
-          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
-            artifact="artifacts/liboqs-android-$abi/liboqs-${{ needs.check-release.outputs.version }}-android-$abi.tar.gz"
-            if [ -f "$artifact" ]; then
-              tmp=$(mktemp -d)
-              tar -xzf "$artifact" -C "$tmp"
-              mkdir -p combined/liboqs-${{ needs.check-release.outputs.version }}/android/$abi
-              cp "$tmp"/lib/liboqs.so combined/liboqs-${{ needs.check-release.outputs.version }}/android/$abi/ 2>/dev/null || true
-              rm -rf "$tmp"
-            fi
+          
+          for artifact in artifacts/*/liboqs-*.zip; do
+            [ -f "$artifact" ] && unzip -q "$artifact" -d combined/liboqs-${{ needs.check-release.outputs.version }} || true
           done
-
+          
+          # Create README explaining the structure
           cat > combined/liboqs-${{ needs.check-release.outputs.version }}/README.txt << 'EOF'
-          liboqs - All Platforms Combined
-          ================================
-
+          liboqs ${{ needs.check-release.outputs.version }} - All Platforms Combined
+          ================================================================
+          
+          This archive contains pre-built binaries for all supported platforms.
+          
           Structure:
-            lib/x86_64/liboqs.so      - Linux x86_64
-            lib/aarch64/liboqs.so     - Linux ARM64
-            lib/liboqs.dylib          - macOS ARM64
-            lib/cmake/                - CMake config
-            bin/oqs.dll               - Windows x64
-            include/oqs/              - Headers
-            android/arm64-v8a/        - Android ARM64
-            android/armeabi-v7a/      - Android ARM32
-            android/x86_64/           - Android x86_64
-            android/x86/              - Android x86
-            liboqs.xcframework/       - iOS XCFramework
-
-          Usage with LibOQSLoader:
-            LibOQSLoader.loadLibrary(binaryRoot: '/path/to/liboqs-VERSION');
+            lib/     - Compiled libraries for all platforms
+            include/ - Header files (shared across platforms)
+            bin/     - Windows DLLs
+          
+          Individual platform archives are also available in the release.
+          
+          For platform-specific builds, download the individual archives:
+          - liboqs-*-linux-x86_64.tar.gz
+          - liboqs-*-macos-arm64.tar.gz
+          - liboqs-*-windows-x64.zip
+          - liboqs-*-ios.xcframework.zip
+          - liboqs-*-android-*.tar.gz
           EOF
-
+          
+          # Create the combined archive
           cd combined
           tar -czf ../liboqs-${{ needs.check-release.outputs.version }}-all-platforms.tar.gz liboqs-${{ needs.check-release.outputs.version }}
           cd ..
+          
+          # Move it to artifacts directory
           mkdir -p artifacts/combined
           mv liboqs-${{ needs.check-release.outputs.version }}-all-platforms.tar.gz artifacts/combined/
-
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -460,16 +387,26 @@ jobs:
           body: |
             ## Pre-built binaries for liboqs ${{ needs.check-release.outputs.version }}
             
-            Source: https://github.com/${{ env.LIBOQS_REPO }}/releases/tag/${{ needs.check-release.outputs.version }}
+            Source: https://github.com/${{ env.LIBOQS_REPO }}/releases/tag/${{ github.event.inputs.liboqs_version }}
             
             ### Desktop Platforms
-            - **Linux**: x86_64, ARM64
-            - **macOS**: ARM64 (Apple Silicon)
+            - **Linux**: x86_64 only
+            - **macOS**: ARM64 (Apple Silicon) only
             - **Windows**: x64
             
             ### Mobile Platforms
             - **iOS**: XCFramework (device ARM64 + simulator ARM64/x86_64)
             - **Android**: armeabi-v7a, arm64-v8a, x86, x86_64 (API level 21+)
+            
+            ### Note on Platform Selection
+            This release focuses on the most commonly used platforms:
+            - Linux x86_64 covers most server and desktop deployments
+            - macOS ARM64 covers M1/M2/M3/M4 Macs (most current Macs)
+            - Excluded: Linux ARM64, macOS x86_64 (Intel) due to runner availability
+            
+            ### Usage
+            Download the appropriate archive for your platform and extract it.
+            Archives contain compiled libraries in `lib/` and headers in `include/`.
             
             ### Build Details
             - Build type: Release
@@ -477,14 +414,12 @@ jobs:
             - Tests: Disabled
             - NDK (Android): r27c
             - iOS deployment target: 13.0
-            - Linux ARM64: Built via QEMU emulation
             
-            ### Files
+            ### Files in this Release
             
-            **Individual:**
+            **Individual Platform Archives:**
             ```
             liboqs-${{ needs.check-release.outputs.version }}-linux-x86_64.tar.gz
-            liboqs-${{ needs.check-release.outputs.version }}-linux-aarch64.tar.gz
             liboqs-${{ needs.check-release.outputs.version }}-macos-arm64.tar.gz
             liboqs-${{ needs.check-release.outputs.version }}-windows-x64.zip
             liboqs-${{ needs.check-release.outputs.version }}-ios.xcframework.zip
@@ -494,10 +429,11 @@ jobs:
             liboqs-${{ needs.check-release.outputs.version }}-android-x86_64.tar.gz
             ```
             
-            **Combined (All Platforms):**
+            **Combined Archive (All Platforms):**
             ```
             liboqs-${{ needs.check-release.outputs.version }}-all-platforms.tar.gz
             ```
+            Contains all binaries from all platforms in a single archive for convenience.
           files: artifacts/**/*
           draft: false
           prerelease: false

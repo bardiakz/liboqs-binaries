@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.2] - 2026-08-08
+### Updated
+- readme
+### Removed
+- build-liboqs workflow
+
 ## [2.0.1] - 2026-08-08
 ### Changed 
 - macos-13 runner to macos-15-intel

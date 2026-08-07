@@ -514,7 +514,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.check-release.outputs.tag }}
-          name: liboqs ${{ needs.check-release.outputs.liboqs_version }} (${{ needs.check-release.outputs.tag }})
+          name: liboqs (${{ needs.check-release.outputs.tag }})
           body: |
             ## Pre-built binaries for liboqs ${{ needs.check-release.outputs.liboqs_version }}
 

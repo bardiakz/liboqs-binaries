@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2026-08-08
+### Changed 
+- macos-13 runner to macos-15-intel
+- mac arm runner to macos-latest
+
 ## [2.0.0] - 2026-08-08
 
 ### Breaking

@@ -441,8 +441,29 @@ jobs:
               *.zip)    unzip -q "$archive" -d "$tmp" ;;
             esac
             mkdir -p "$dest"
-            # copy whatever library file(s) exist, whatever their name/extension
-            find "$tmp/lib" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$dest/" \; 2>/dev/null || true
+
+            # Linux: cmake installs liboqs.so -> liboqs.so.9 -> liboqs.so.X.Y.Z
+            # (symlink chain). We want a single plain "liboqs.so" regular file
+            # in the combined archive, resolved through the chain, so the
+            # loader never has to guess a version suffix.
+            if [ -f "$tmp/lib/liboqs.so" ] || [ -L "$tmp/lib/liboqs.so" ]; then
+              cp -L "$tmp/lib/liboqs.so" "$dest/liboqs.so"
+            else
+              # fallback: no plain symlink found, take the most-versioned real file
+              local real_so
+              real_so=$(find "$tmp/lib" -maxdepth 1 -type f -name 'liboqs.so.*' | sort -V | tail -n1)
+              [ -n "$real_so" ] && cp "$real_so" "$dest/liboqs.so"
+            fi
+
+            # macOS: same idea, cmake installs liboqs.dylib -> liboqs.X.Y.Z.dylib
+            if [ -f "$tmp/lib/liboqs.dylib" ] || [ -L "$tmp/lib/liboqs.dylib" ]; then
+              cp -L "$tmp/lib/liboqs.dylib" "$dest/liboqs.dylib"
+            else
+              local real_dylib
+              real_dylib=$(find "$tmp/lib" -maxdepth 1 -type f -name 'liboqs.*.dylib' | sort -V | tail -n1)
+              [ -n "$real_dylib" ] && cp "$real_dylib" "$dest/liboqs.dylib"
+            fi
+
             find "$tmp/bin" -maxdepth 1 -type f -name '*.dll' -exec cp {} "$dest/" \; 2>/dev/null || true
             if [ "$copy_include" = "1" ] && [ -d "$tmp/include" ]; then
               cp -r "$tmp/include/." "$ROOT/include/"

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - 16 KB page-size alignment for Android shared libraries (`-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384`) for Android 15+ compatibility.
 - Bumped build revision to `v3`.
+### Changed
+- Migrated iOS runner from deprecated `macos-14` to `macos-latest`.
 
 ## [2.0.2] - 2026-08-08
 ### Updated

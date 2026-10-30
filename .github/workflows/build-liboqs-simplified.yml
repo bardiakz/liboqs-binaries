@@ -30,7 +30,7 @@ jobs:
       - name: Get target liboqs version
         id: get-version
         env:
-          BUILD_REVISION: 'v2'
+          BUILD_REVISION: 'v3'
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             LIBOQS_VERSION="${{ github.event.inputs.liboqs_version }}"
@@ -382,6 +382,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=${{ matrix.abi }} \
             -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384" \
             -DBUILD_SHARED_LIBS=ON \
             -DBUILD_TESTING=OFF \
             -DOQS_USE_OPENSSL=OFF \

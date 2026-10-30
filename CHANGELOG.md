@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.3] - 2026-10-30
+### Added
+- 16 KB page-size alignment for Android shared libraries (`-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384`) for Android 15+ compatibility.
+- Bumped build revision to `v3`.
+
 ## [2.0.2] - 2026-08-08
 ### Updated
 - readme
